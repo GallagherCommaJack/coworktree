@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"text/tabwriter"
 
 	"coworktree/pkg/cowgit"
@@ -42,18 +41,16 @@ func listWorktrees(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 
-	// Get list of worktrees
-	worktrees, err := cowgit.ListWorktrees(repoPath)
+	// Create manager
+	manager, err := cowgit.NewManager(repoPath)
 	if err != nil {
-		return fmt.Errorf("failed to list worktrees: %w", err)
+		return err
 	}
 
-	// Filter to only show CoW worktrees (those in .cow-worktrees directory)
-	var cowWorktrees []cowgit.WorktreeInfo
-	for _, wt := range worktrees {
-		if strings.Contains(wt.Path, ".cow-worktrees") || wt.Path != repoPath {
-			cowWorktrees = append(cowWorktrees, wt)
-		}
+	// Get list of CoW worktrees
+	cowWorktrees, err := manager.ListCoW()
+	if err != nil {
+		return fmt.Errorf("failed to list worktrees: %w", err)
 	}
 
 	switch listFormat {

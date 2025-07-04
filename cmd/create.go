@@ -38,9 +38,6 @@ func createWorktree(cmd *cobra.Command, args []string) error {
 	}
 
 	branchName := args[0]
-	if createPrefix != "" {
-		branchName = createPrefix + branchName
-	}
 
 	// Get current working directory as repo path
 	repoPath, err := os.Getwd()
@@ -48,72 +45,71 @@ func createWorktree(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 
-	// Determine worktree path
-	var worktreePath string
-	if createPath != "" {
-		worktreePath = createPath
-	} else {
-		worktreePath = filepath.Join(repoPath, ".cow-worktrees", branchName)
+	// Create manager
+	manager, err := cowgit.NewManager(repoPath)
+	if err != nil {
+		return err
+	}
+
+	// Set up create options
+	opts := cowgit.CreateOptions{
+		BranchName:   branchName,
+		WorktreePath: createPath,
+		FromCommit:   createFrom,
+		NoCoW:        noCow,
+		NoRewrite:    noRewrite,
+		Prefix:       createPrefix,
 	}
 
 	if verbose {
+		worktreePath := opts.WorktreePath
+		effectiveBranchName := branchName
+		if createPrefix != "" {
+			effectiveBranchName = createPrefix + branchName
+		}
+		if worktreePath == "" {
+			worktreePath = filepath.Join(repoPath, ".cow-worktrees", effectiveBranchName)
+		}
 		fmt.Printf("Creating worktree: %s\n", worktreePath)
-		fmt.Printf("Branch: %s\n", branchName)
+		fmt.Printf("Branch: %s\n", effectiveBranchName)
 		fmt.Printf("CoW enabled: %t\n", !noCow)
 	}
 
 	if dryRun {
+		worktreePath := opts.WorktreePath
+		effectiveBranchName := branchName
+		if createPrefix != "" {
+			effectiveBranchName = createPrefix + branchName
+		}
+		if worktreePath == "" {
+			worktreePath = filepath.Join(repoPath, ".cow-worktrees", effectiveBranchName)
+		}
 		fmt.Printf("Would create worktree at: %s\n", worktreePath)
-		fmt.Printf("Would create branch: %s\n", branchName)
+		fmt.Printf("Would create branch: %s\n", effectiveBranchName)
 		return nil
 	}
 
 	// Create the worktree
-	worktree := cowgit.NewWorktreeWithOptions(repoPath, worktreePath, branchName, noRewrite)
-
-	// Check if CoW is supported and enabled
-	if !noCow {
-		if supported, err := cowgit.IsCoWSupported(repoPath); err != nil {
-			if verbose {
-				fmt.Printf("Warning: Failed to check CoW support: %v\n", err)
-			}
-		} else if supported {
-			if verbose {
-				fmt.Printf("CoW supported, creating CoW worktree\n")
-			}
-			if err := worktree.CreateCoWWorktree(); err != nil {
-				if verbose {
-					fmt.Printf("CoW failed, falling back to regular worktree: %v\n", err)
-				}
-				return createRegularWorktree(worktree)
-			}
-			fmt.Printf("Created CoW worktree at: %s\n", worktreePath)
-			return nil
-		}
+	worktree, err := manager.Create(opts)
+	if err != nil {
+		return err
 	}
 
-	// Fall back to regular worktree
-	if verbose {
-		fmt.Printf("Creating regular worktree\n")
-	}
-	return createRegularWorktree(worktree)
-}
-
-func createRegularWorktree(worktree *cowgit.Worktree) error {
-	// For regular worktree, we need to use git commands directly
-	// since our CoW implementation expects to clone the whole repo
-	if err := os.MkdirAll(filepath.Dir(worktree.WorktreePath), 0755); err != nil {
-		return fmt.Errorf("failed to create worktree directory: %w", err)
+	// Determine if CoW was used
+	isCoW := !noCow
+	if supported, err := manager.IsCoWSupported(); err != nil || !supported {
+		isCoW = false
 	}
 
-	// Use git worktree add directly
-	if err := runGitCommand(worktree.RepoPath, "worktree", "add", "-b", worktree.BranchName, worktree.WorktreePath); err != nil {
-		return fmt.Errorf("failed to create regular worktree: %w", err)
+	if isCoW {
+		fmt.Printf("Created CoW worktree at: %s\n", worktree.WorktreePath)
+	} else {
+		fmt.Printf("Created regular worktree at: %s\n", worktree.WorktreePath)
 	}
 
-	fmt.Printf("Created regular worktree at: %s\n", worktree.WorktreePath)
 	return nil
 }
+
 
 func init() {
 	rootCmd.AddCommand(createCmd)

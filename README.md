@@ -18,7 +18,9 @@ go build -o coworktree
 
 ## Usage
 
-### Create a new CoW worktree
+### As a CLI Tool
+
+#### Create a new CoW worktree
 
 ```bash
 coworktree create feature-branch
@@ -29,7 +31,7 @@ This will:
 2. Create a new git branch in the worktree
 3. Register the worktree with git
 
-### List all worktrees
+#### List all worktrees
 
 ```bash
 coworktree list
@@ -37,18 +39,77 @@ coworktree list --format=json
 coworktree list --show-stats
 ```
 
-### Remove a worktree
+#### Remove a worktree
 
 ```bash
 coworktree remove feature-branch
 coworktree remove feature-branch --keep-branch
 ```
 
-### Global flags
+#### Global flags
 
 - `--verbose, -v`: Enable verbose logging
 - `--dry-run`: Show what would be done without executing
 - `--no-cow`: Force traditional git worktree (skip CoW)
+
+### As a Go Library
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    
+    "coworktree/pkg/cowgit"
+)
+
+func main() {
+    // Create a manager for the current repository
+    manager, err := cowgit.NewManager(".")
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Create a new CoW worktree
+    opts := cowgit.CreateOptions{
+        BranchName: "feature-branch",
+        // WorktreePath: "/custom/path", // Optional custom path
+        // NoCoW: false,                // Optional: disable CoW
+        // Prefix: "prefix-",           // Optional: branch name prefix
+    }
+    
+    worktree, err := manager.Create(opts)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    fmt.Printf("Created worktree at: %s\n", worktree.WorktreePath)
+    
+    // List all CoW worktrees
+    worktrees, err := manager.ListCoW()
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    for _, wt := range worktrees {
+        fmt.Printf("Branch: %s, Path: %s\n", wt.Branch, wt.Path)
+    }
+    
+    // Remove a worktree (and its branch)
+    err = manager.Remove("feature-branch", false)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Check if CoW is supported
+    supported, err := manager.IsCoWSupported()
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("CoW supported: %t\n", supported)
+}
+```
 
 ## Platform Support
 

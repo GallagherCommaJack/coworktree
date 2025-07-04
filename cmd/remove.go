@@ -41,8 +41,14 @@ func removeWorktree(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 
-	// Try to find the worktree
-	worktrees, err := cowgit.ListWorktrees(repoPath)
+	// Create manager
+	manager, err := cowgit.NewManager(repoPath)
+	if err != nil {
+		return err
+	}
+
+	// Try to find the worktree to get its path for display
+	worktrees, err := manager.List()
 	if err != nil {
 		return fmt.Errorf("failed to list worktrees: %w", err)
 	}
@@ -82,25 +88,18 @@ func removeWorktree(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Worktree does not exist, continuing with branch cleanup\n")
 	}
 
-	// Create worktree instance
-	worktree := cowgit.NewWorktree(repoPath, worktreePath, branchName)
-
-	// Remove the worktree
-	if keepBranch {
-		if err := worktree.Remove(); err != nil {
-			if !force {
-				return fmt.Errorf("failed to remove worktree: %w", err)
-			}
-			fmt.Printf("Warning: Failed to remove worktree: %v\n", err)
+	// Remove the worktree using manager
+	if err := manager.Remove(branchName, keepBranch); err != nil {
+		if !force {
+			return fmt.Errorf("failed to remove worktree: %w", err)
 		}
+		fmt.Printf("Warning: Failed to remove worktree: %v\n", err)
+		return nil
+	}
+
+	if keepBranch {
 		fmt.Printf("Removed worktree (kept branch): %s\n", worktreePath)
 	} else {
-		if err := worktree.RemoveWithBranch(); err != nil {
-			if !force {
-				return fmt.Errorf("failed to remove worktree and branch: %w", err)
-			}
-			fmt.Printf("Warning: Failed to remove worktree and branch: %v\n", err)
-		}
 		fmt.Printf("Removed worktree and branch: %s\n", worktreePath)
 	}
 
