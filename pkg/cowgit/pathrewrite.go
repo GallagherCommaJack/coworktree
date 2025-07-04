@@ -5,9 +5,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"sync"
 	"unicode/utf8"
 )
 
@@ -95,80 +93,44 @@ func matchWildcard(pattern, path string) bool {
 	return false
 }
 
-// rewriteAbsolutePathsAsync rewrites absolute paths in gitignored text files
+// rewriteAbsolutePathsAsync rewrites absolute paths in gitignored text files using adaptive worker pool
 func rewriteAbsolutePathsAsync(srcDir, dstDir string) error {
-	numWorkers := runtime.NumCPU()
-	fileChan := make(chan string, 1000)
-	errChan := make(chan error, 1)
-	var wg sync.WaitGroup
-
 	gitignore := parseGitignore(srcDir)
-	srcDirBytes := []byte(srcDir)
-	dstDirBytes := []byte(dstDir)
-
-	// File processing workers
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for path := range fileChan {
-				relPath, err := filepath.Rel(dstDir, path)
-				if err != nil {
-					continue
-				}
-
-				// Filter: gitignored files only
-				if !gitignore.Match(relPath) {
-					continue
-				}
-
-				// Read file and check if it's text
-				content, err := os.ReadFile(path)
-				if err != nil {
-					continue
-				}
-
-				// Skip binary files
-				if !isValidText(content) {
-					continue
-				}
-
-				// Replace srcDir with dstDir
-				if updated := bytes.ReplaceAll(content, srcDirBytes, dstDirBytes); !bytes.Equal(content, updated) {
-					if err := os.WriteFile(path, updated, 0644); err != nil {
-						select {
-						case errChan <- err:
-						default:
-						}
-						return
-					}
-				}
-			}
-		}()
+	
+	// Create adaptive worker pool
+	pool := NewWorkerPool(srcDir, dstDir, gitignore)
+	controller := NewPoolController(pool)
+	
+	// Start pool and controller
+	pool.Start()
+	controller.Start()
+	
+	// Clean up when done
+	defer func() {
+		controller.Stop()
+		pool.Stop()
+	}()
+	
+	// Submit all files for processing
+	walkErr := filepath.Walk(dstDir, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			pool.Submit(path)
+		}
+		return nil
+	})
+	
+	if walkErr != nil {
+		return walkErr
 	}
-
-	// File discovery worker
-	go func() {
-		defer close(fileChan)
-		filepath.Walk(dstDir, func(path string, info os.FileInfo, err error) error {
-			if err == nil && !info.IsDir() {
-				fileChan <- path
-			}
-			return nil
-		})
-	}()
-
-	// Wait for completion
-	go func() {
-		wg.Wait()
-		close(errChan)
-	}()
-
-	// Return first error if any
-	for err := range errChan {
+	
+	// Wait for any errors
+	select {
+	case err := <-pool.Error():
 		if err != nil {
 			return err
 		}
+	default:
+		// No errors
 	}
 	
 	return nil
