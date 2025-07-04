@@ -5,7 +5,7 @@ all: build
 
 # Build the binary
 build:
-	go build -o cowtree
+	go build -o coworktree
 
 # Run tests
 test:
@@ -18,7 +18,7 @@ test-coverage:
 
 # Clean build artifacts
 clean:
-	rm -f cowtree coverage.out coverage.html
+	rm -f coworktree coverage.out coverage.html
 
 # Install dependencies
 deps:
@@ -27,7 +27,7 @@ deps:
 
 # Install the binary
 install: build
-	sudo cp cowtree /usr/local/bin/
+	sudo cp coworktree /usr/local/bin/
 
 # Run linter
 lint:
@@ -44,7 +44,7 @@ test-quick:
 # Help
 help:
 	@echo "Available targets:"
-	@echo "  build         Build the cowtree binary"
+	@echo "  build         Build the coworktree binary"
 	@echo "  test          Run all tests"
 	@echo "  test-coverage Run tests with coverage report"
 	@echo "  test-quick    Run quick tests (skip integration)"

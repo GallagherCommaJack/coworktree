@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"cowtree/cmd"
+	"coworktree/cmd"
 )
 
 func main() {

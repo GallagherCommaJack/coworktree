@@ -31,8 +31,8 @@ ehthumbs.db
 Thumbs.db
 
 # Claude Code trace folder
-claude-trace/
+.claude-trace/
 
 # Build artifacts
-/cowtree
+/coworktree
 /dist/

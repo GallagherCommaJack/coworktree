@@ -8,7 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"cowtree/pkg/cowgit"
+	"coworktree/pkg/cowgit"
 	"github.com/spf13/cobra"
 )
 

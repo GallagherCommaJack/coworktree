@@ -1,4 +1,4 @@
-# CoWTree
+# CoWorktree
 
 A Copy-on-Write Git Worktree Manager that combines filesystem-level CoW features with git worktrees to create instant, fully-featured development environments.
 
@@ -13,7 +13,7 @@ A Copy-on-Write Git Worktree Manager that combines filesystem-level CoW features
 ## Installation
 
 ```bash
-go build -o cowtree
+go build -o coworktree
 ```
 
 ## Usage
@@ -21,7 +21,7 @@ go build -o cowtree
 ### Create a new CoW worktree
 
 ```bash
-cowtree create feature-branch
+coworktree create feature-branch
 ```
 
 This will:
@@ -32,16 +32,16 @@ This will:
 ### List all worktrees
 
 ```bash
-cowtree list
-cowtree list --format=json
-cowtree list --show-stats
+coworktree list
+coworktree list --format=json
+coworktree list --show-stats
 ```
 
 ### Remove a worktree
 
 ```bash
-cowtree remove feature-branch
-cowtree remove feature-branch --keep-branch
+coworktree remove feature-branch
+coworktree remove feature-branch --keep-branch
 ```
 
 ### Global flags
@@ -67,7 +67,7 @@ cowtree remove feature-branch --keep-branch
 
 ## How It Works
 
-CoWTree leverages filesystem-level copy-on-write features to create instant copies of your entire project directory, including:
+CoWorktree leverages filesystem-level copy-on-write features to create instant copies of your entire project directory, including:
 
 - Source code
 - Dependencies (`node_modules`, `venv`, `vendor`, etc.)
@@ -89,7 +89,7 @@ The CoW clone shares storage with the original until files are modified, making 
 
 On a typical Node.js project with 18k+ files in `node_modules`:
 - Traditional `git worktree` + `npm install`: 30-60 seconds
-- CoWTree: <2 seconds
+- CoWorktree: <2 seconds
 
 ## Testing
 

@@ -15,9 +15,9 @@ var (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "cowtree",
+	Use:   "coworktree",
 	Short: "A Copy-on-Write Git Worktree Manager",
-	Long: `cowtree combines copy-on-write filesystem features with git worktrees 
+	Long: `coworktree combines copy-on-write filesystem features with git worktrees 
 to create instant, fully-featured development environments.
 
 Features:

@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"cowtree/pkg/cowgit"
+	"coworktree/pkg/cowgit"
 	"github.com/spf13/cobra"
 )
 

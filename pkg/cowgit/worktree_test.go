@@ -9,7 +9,7 @@ import (
 
 func TestWorktreeOperations(t *testing.T) {
 	// Create a temporary git repository for testing
-	tempDir, err := os.MkdirTemp("", "cowtree-test-*")
+	tempDir, err := os.MkdirTemp("", "coworktree-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
