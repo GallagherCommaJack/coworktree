@@ -41,7 +41,12 @@ func (m *Manager) Create(opts CreateOptions) (*Worktree, error) {
 	// Determine worktree path if not specified
 	worktreePath := opts.WorktreePath
 	if worktreePath == "" {
-		worktreePath = filepath.Join(m.RepoPath, ".cow-worktrees", branchName)
+		// Use temp directory to avoid issues with nested paths and cleanup
+		tempDir, err := os.MkdirTemp("", "cowtree-"+branchName+"-")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temp directory: %w", err)
+		}
+		worktreePath = tempDir
 	}
 
 	// Create worktree instance
@@ -68,7 +73,12 @@ func (m *Manager) Create(opts CreateOptions) (*Worktree, error) {
 // CreateFromBranch creates a worktree from an existing branch
 func (m *Manager) CreateFromBranch(branchName, worktreePath string) (*Worktree, error) {
 	if worktreePath == "" {
-		worktreePath = filepath.Join(m.RepoPath, ".cow-worktrees", branchName)
+		// Use temp directory
+		tempDir, err := os.MkdirTemp("", "cowtree-"+branchName+"-")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temp directory: %w", err)
+		}
+		worktreePath = tempDir
 	}
 
 	worktree := NewWorktree(m.RepoPath, worktreePath, branchName)
@@ -84,7 +94,7 @@ func (m *Manager) List() ([]WorktreeInfo, error) {
 	return ListWorktrees(m.RepoPath)
 }
 
-// ListCoW returns only CoW worktrees (those in .cow-worktrees)
+// ListCoW returns only CoW worktrees (excludes the main repo)
 func (m *Manager) ListCoW() ([]WorktreeInfo, error) {
 	worktrees, err := ListWorktrees(m.RepoPath)
 	if err != nil {
@@ -93,8 +103,8 @@ func (m *Manager) ListCoW() ([]WorktreeInfo, error) {
 
 	var cowWorktrees []WorktreeInfo
 	for _, wt := range worktrees {
-		// Include worktrees that are in .cow-worktrees or not the main repo
-		if filepath.Base(filepath.Dir(wt.Path)) == ".cow-worktrees" || wt.Path != m.RepoPath {
+		// Include worktrees that are not the main repo
+		if wt.Path != m.RepoPath {
 			cowWorktrees = append(cowWorktrees, wt)
 		}
 	}
@@ -119,8 +129,8 @@ func (m *Manager) Remove(branchName string, keepBranch bool) error {
 	}
 
 	if worktreePath == "" {
-		// Try default path
-		worktreePath = filepath.Join(m.RepoPath, ".cow-worktrees", branchName)
+		// No default path for removal - worktree path must be found from git
+		return fmt.Errorf("worktree for branch %s not found", branchName)
 	}
 
 	worktree := NewWorktree(m.RepoPath, worktreePath, branchName)

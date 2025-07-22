@@ -8,6 +8,7 @@ A Copy-on-Write Git Worktree Manager that combines filesystem-level CoW features
 - **Complete isolation**: Each worktree can modify dependencies without affecting others
 - **Zero manual setup**: No need to run `npm install`, `pip install`, `go mod download`, etc.
 - **Git integration**: Proper git worktree management with branch tracking
+- **Full compatibility**: Drop-in replacement for `git worktree` commands
 - **Cross-platform**: Support macOS (APFS) and Linux (overlayfs - coming soon)
 
 ## Installation
@@ -18,39 +19,50 @@ go build -o coworktree
 
 ## Usage
 
-### As a CLI Tool
+CoWorktree is fully compatible with `git worktree` commands - just replace `git worktree` with `coworktree`:
 
-#### Create a new CoW worktree
+### Add a new CoW worktree
 
 ```bash
-coworktree create feature-branch
+# Create worktree at path (auto-generates branch name)
+coworktree add ../feature-work
+
+# Create worktree with specific branch name
+coworktree add -b my-feature ../feature-work
+
+# Create from specific commit
+coworktree add ../hotfix abc123
+
+# Create in temp directory (if no path specified)
+coworktree add -b experiment
 ```
 
 This will:
 1. Create a CoW clone of your entire project (including `node_modules`, build artifacts, etc.)
 2. Create a new git branch in the worktree
 3. Register the worktree with git
+4. Preserve all untracked and gitignored files
 
-#### List all worktrees
+### List all worktrees
 
 ```bash
 coworktree list
-coworktree list --format=json
-coworktree list --show-stats
+# Forwards directly to: git worktree list
 ```
 
-#### Remove a worktree
+### Remove a worktree
 
 ```bash
-coworktree remove feature-branch
-coworktree remove feature-branch --keep-branch
+coworktree remove ../feature-work
+# Forwards directly to: git worktree remove ../feature-work
 ```
 
-#### Global flags
+### Global flags
 
 - `--verbose, -v`: Enable verbose logging
 - `--dry-run`: Show what would be done without executing
 - `--no-cow`: Force traditional git worktree (skip CoW)
+- `--no-rewrite`: Skip absolute path rewriting in gitignored files
 
 ### As a Go Library
 
@@ -65,29 +77,30 @@ import (
 )
 
 func main() {
-    // Create a manager for the current repository
-    manager, err := cowgit.NewManager(".")
-    if err != nil {
-        log.Fatal(err)
+    // Create a new CoW worktree directly
+    repoPath := "."
+    worktreePath := "/tmp/my-feature"
+    branchName := "my-feature"
+    
+    worktree := cowgit.NewWorktree(repoPath, worktreePath, branchName)
+    
+    // Check if CoW is supported
+    if supported, err := cowgit.IsCoWSupported(repoPath); err == nil && supported {
+        // Create CoW worktree
+        if err := worktree.CreateCoWWorktree(); err != nil {
+            log.Fatal(err)
+        }
+        fmt.Printf("Created CoW worktree at: %s\n", worktree.WorktreePath)
+    } else {
+        // Fall back to regular worktree
+        if err := worktree.CreateFromExistingBranch(); err != nil {
+            log.Fatal(err)
+        }
+        fmt.Printf("Created regular worktree at: %s\n", worktree.WorktreePath)
     }
     
-    // Create a new CoW worktree
-    opts := cowgit.CreateOptions{
-        BranchName: "feature-branch",
-        // WorktreePath: "/custom/path", // Optional custom path
-        // NoCoW: false,                // Optional: disable CoW
-        // Prefix: "prefix-",           // Optional: branch name prefix
-    }
-    
-    worktree, err := manager.Create(opts)
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    fmt.Printf("Created worktree at: %s\n", worktree.WorktreePath)
-    
-    // List all CoW worktrees
-    worktrees, err := manager.ListCoW()
+    // List all worktrees
+    worktrees, err := cowgit.ListWorktrees(repoPath)
     if err != nil {
         log.Fatal(err)
     }
@@ -95,19 +108,6 @@ func main() {
     for _, wt := range worktrees {
         fmt.Printf("Branch: %s, Path: %s\n", wt.Branch, wt.Path)
     }
-    
-    // Remove a worktree (and its branch)
-    err = manager.Remove("feature-branch", false)
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    // Check if CoW is supported
-    supported, err := manager.IsCoWSupported()
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Printf("CoW supported: %t\n", supported)
 }
 ```
 
@@ -161,6 +161,7 @@ go test ./pkg/cowgit -v
 Tests cover:
 - CoW functionality on APFS
 - Git worktree integration
+- Preservation of untracked and gitignored files
 - Large project handling
 - Cross-platform compatibility
 

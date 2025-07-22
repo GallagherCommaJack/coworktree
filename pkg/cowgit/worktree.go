@@ -41,12 +41,6 @@ func NewWorktreeWithOptions(repoPath, worktreePath, branchName string, noRewrite
 
 // CreateCoWWorktree creates a new worktree using copy-on-write
 func (w *Worktree) CreateCoWWorktree() error {
-	// Ensure worktrees directory exists
-	worktreesDir := filepath.Dir(w.WorktreePath)
-	if err := os.MkdirAll(worktreesDir, 0755); err != nil {
-		return fmt.Errorf("failed to create worktrees directory: %w", err)
-	}
-
 	// Clean up any existing worktree first
 	w.runGitCommand(w.RepoPath, "worktree", "remove", "-f", w.WorktreePath) // Ignore error if worktree doesn't exist
 
@@ -97,20 +91,27 @@ func (w *Worktree) setupWorktreeWithCoW() error {
 		return fmt.Errorf("failed to remove existing worktree path: %w", err)
 	}
 
-	// Create CoW clone of the entire repository
+	// Create CoW clone directly to the worktree path
 	if err := CloneDirectory(w.RepoPath, w.WorktreePath); err != nil {
 		return fmt.Errorf("failed to clone directory: %w", err)
 	}
 
-	// Create and checkout the new branch in the cloned directory
-	if _, err := w.runGitCommand(w.WorktreePath, "checkout", "-b", w.BranchName); err != nil {
-		// Clean up the clone if checkout fails
+	// Create new branch without checking it out (to preserve untracked files)
+	if _, err := w.runGitCommand(w.WorktreePath, "branch", w.BranchName); err != nil {
+		// Clean up the clone if branch creation fails
 		os.RemoveAll(w.WorktreePath)
 		return fmt.Errorf("failed to create branch %s: %w", w.BranchName, err)
 	}
+	
+	// Switch to the new branch without overwriting working directory
+	if _, err := w.runGitCommand(w.WorktreePath, "symbolic-ref", "HEAD", "refs/heads/"+w.BranchName); err != nil {
+		// Clean up the clone if symbolic-ref fails
+		os.RemoveAll(w.WorktreePath)
+		return fmt.Errorf("failed to switch to branch %s: %w", w.BranchName, err)
+	}
 
-	// Register the cloned directory as a proper git worktree
-	if _, err := w.runGitCommand(w.RepoPath, "worktree", "add", "--detach", w.WorktreePath); err != nil {
+	// Manually register the cloned directory as a proper git worktree
+	if err := w.registerWorktreeManually(); err != nil {
 		// Clean up the clone if worktree registration fails
 		os.RemoveAll(w.WorktreePath)
 		return fmt.Errorf("failed to register worktree: %w", err)
@@ -242,6 +243,51 @@ func (w *Worktree) runGitCommand(dir string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	return cmd.Output()
+}
+
+// registerWorktreeManually manually registers a CoW clone as a git worktree
+func (w *Worktree) registerWorktreeManually() error {
+	// Create worktree name (using the branch name)
+	worktreeName := w.BranchName
+	
+	// Create the worktree metadata directory in main repo
+	worktreeMetaDir := filepath.Join(w.RepoPath, ".git", "worktrees", worktreeName)
+	if err := os.MkdirAll(worktreeMetaDir, 0755); err != nil {
+		return fmt.Errorf("failed to create worktree metadata directory: %w", err)
+	}
+	
+	// Create HEAD file in worktree metadata pointing to the branch
+	headFile := filepath.Join(worktreeMetaDir, "HEAD")
+	headRef := fmt.Sprintf("ref: refs/heads/%s\n", w.BranchName)
+	if err := os.WriteFile(headFile, []byte(headRef), 0644); err != nil {
+		return fmt.Errorf("failed to write HEAD file: %w", err)
+	}
+	
+	// Create commondir file pointing to main repo's .git
+	commondirFile := filepath.Join(worktreeMetaDir, "commondir")
+	if err := os.WriteFile(commondirFile, []byte("../..\n"), 0644); err != nil {
+		return fmt.Errorf("failed to write commondir file: %w", err)
+	}
+	
+	// Create gitdir file pointing to worktree's .git file
+	gitdirFile := filepath.Join(worktreeMetaDir, "gitdir")
+	worktreeGitFile := filepath.Join(w.WorktreePath, ".git")
+	if err := os.WriteFile(gitdirFile, []byte(worktreeGitFile+"\n"), 0644); err != nil {
+		return fmt.Errorf("failed to write gitdir file: %w", err)
+	}
+	
+	// Replace worktree's .git directory with .git file pointing to metadata
+	worktreeGitDir := filepath.Join(w.WorktreePath, ".git")
+	if err := os.RemoveAll(worktreeGitDir); err != nil {
+		return fmt.Errorf("failed to remove .git directory: %w", err)
+	}
+	
+	gitFileContent := fmt.Sprintf("gitdir: %s\n", worktreeMetaDir)
+	if err := os.WriteFile(worktreeGitFile, []byte(gitFileContent), 0644); err != nil {
+		return fmt.Errorf("failed to write .git file: %w", err)
+	}
+	
+	return nil
 }
 
 // combineErrors combines multiple errors into a single error
