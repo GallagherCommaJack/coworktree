@@ -37,6 +37,9 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose logging")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "show what would be done without executing")
 	rootCmd.PersistentFlags().BoolVar(&noCow, "no-cow", false, "force traditional git worktree (skip CoW)")
+	
+	// Add benchmark command
+	rootCmd.AddCommand(benchmarkCmd)
 }
 
 // checkGitRepo verifies we're in a git repository
