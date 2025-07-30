@@ -12,7 +12,7 @@ import (
 
 var (
 	branchFlag    string
-	noRewrite     bool
+	enableRewrite bool
 	forceProgress bool
 )
 
@@ -27,7 +27,10 @@ This command will:
 2. Create a new git branch in the worktree
 3. Register the worktree with git
 
-If CoW is not supported, it will fall back to traditional git worktree.`,
+If CoW is not supported, it will fall back to traditional git worktree.
+
+Performance note: By default, absolute path rewriting is disabled for speed.
+Use --rewrite-paths if you need build artifacts (venv, node_modules) to work correctly.`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: addWorktree,
 }
@@ -70,8 +73,8 @@ func addWorktree(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Create worktree instance
-	worktree := cowgit.NewWorktreeWithOptions(repoPath, worktreePath, branchName, noRewrite)
+	// Create worktree instance (invert the logic - disable rewrite by default)
+	worktree := cowgit.NewWorktreeWithOptions(repoPath, worktreePath, branchName, !enableRewrite)
 
 	// Create progress tracker for TTY output (shows in interactive mode or when forced)
 	progress := cowgit.NewProgressTracker(forceProgress)
@@ -119,6 +122,6 @@ func init() {
 	rootCmd.AddCommand(addCmd)
 
 	addCmd.Flags().StringVarP(&branchFlag, "branch", "b", "", "create a new branch")
-	addCmd.Flags().BoolVar(&noRewrite, "no-rewrite", false, "skip absolute path rewriting in gitignored files")
+	addCmd.Flags().BoolVar(&enableRewrite, "rewrite-paths", false, "enable absolute path rewriting in gitignored files (slow but fixes build artifacts)")
 	addCmd.Flags().BoolVar(&forceProgress, "progress", false, "show progress indicators even in non-interactive mode")
 }

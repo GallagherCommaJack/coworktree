@@ -28,8 +28,13 @@ type WorkerPool struct {
 	wg        sync.WaitGroup
 	
 	// Metrics
-	processedFiles int64
-	startTime      time.Time
+	processedFiles    int64
+	gitignoreMatches  int64  // Files that matched gitignore patterns
+	textFiles         int64  // Text files that were candidates for rewriting
+	modifiedFiles     int64  // Files that were actually modified
+	skippedBinary     int64  // Binary files skipped
+	skippedNoMatch    int64  // Files that didn't match gitignore
+	startTime         time.Time
 }
 
 // PoolController manages worker pool scaling
@@ -121,11 +126,39 @@ func (p *WorkerPool) RemoveWorker() bool {
 	return false
 }
 
+// PathRewriteStats contains detailed statistics about path rewriting
+type PathRewriteStats struct {
+	Workers         int32
+	ProcessedFiles  int64
+	GitignoreMatches int64
+	TextFiles       int64
+	ModifiedFiles   int64
+	SkippedBinary   int64
+	SkippedNoMatch  int64
+	QueueDepth      int
+	ElapsedTime     time.Duration
+}
+
 // GetStats returns current pool statistics
 func (p *WorkerPool) GetStats() (workers int32, processed int64, queueDepth int) {
 	return atomic.LoadInt32(&p.workerCount),
 		   atomic.LoadInt64(&p.processedFiles),
 		   len(p.fileChan)
+}
+
+// GetDetailedStats returns comprehensive statistics
+func (p *WorkerPool) GetDetailedStats() PathRewriteStats {
+	return PathRewriteStats{
+		Workers:          atomic.LoadInt32(&p.workerCount),
+		ProcessedFiles:   atomic.LoadInt64(&p.processedFiles),
+		GitignoreMatches: atomic.LoadInt64(&p.gitignoreMatches),
+		TextFiles:        atomic.LoadInt64(&p.textFiles),
+		ModifiedFiles:    atomic.LoadInt64(&p.modifiedFiles),
+		SkippedBinary:    atomic.LoadInt64(&p.skippedBinary),
+		SkippedNoMatch:   atomic.LoadInt64(&p.skippedNoMatch),
+		QueueDepth:       len(p.fileChan),
+		ElapsedTime:      time.Since(p.startTime),
+	}
 }
 
 // worker processes files from the queue
@@ -164,8 +197,11 @@ func (p *WorkerPool) processFile(path string) error {
 
 	// Filter: gitignored files only
 	if !p.gitignore.Match(relPath) {
+		atomic.AddInt64(&p.skippedNoMatch, 1)
 		return nil
 	}
+	
+	atomic.AddInt64(&p.gitignoreMatches, 1)
 
 	// Read file and check if it's text
 	content, err := os.ReadFile(path)
@@ -175,11 +211,15 @@ func (p *WorkerPool) processFile(path string) error {
 
 	// Skip binary files
 	if !isValidText(content) {
+		atomic.AddInt64(&p.skippedBinary, 1)
 		return nil
 	}
+	
+	atomic.AddInt64(&p.textFiles, 1)
 
 	// Replace srcDir with dstDir
 	if updated := bytes.ReplaceAll(content, p.srcDirBytes, p.dstDirBytes); !bytes.Equal(content, updated) {
+		atomic.AddInt64(&p.modifiedFiles, 1)
 		return os.WriteFile(path, updated, 0644)
 	}
 	

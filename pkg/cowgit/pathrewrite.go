@@ -3,9 +3,11 @@ package cowgit
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -163,4 +165,80 @@ func isValidText(content []byte) bool {
 	}
 
 	return true
+}
+
+// rewriteAbsolutePathsWithProgress rewrites absolute paths with detailed progress tracking
+func rewriteAbsolutePathsWithProgress(srcDir, dstDir string, progress *ProgressTracker) error {
+	gitignore := parseGitignore(srcDir)
+	
+	// Create adaptive worker pool
+	pool := NewWorkerPool(srcDir, dstDir, gitignore)
+	controller := NewPoolController(pool)
+	
+	// Start pool and controller
+	pool.Start()
+	controller.Start()
+	
+	// Clean up when done
+	defer func() {
+		controller.Stop()
+		// Don't close errChan here - let the pool handle it
+	}()
+
+	// Track progress with periodic updates
+	done := make(chan bool)
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		
+		for {
+			select {
+			case <-ticker.C:
+				if progress != nil {
+					stats := pool.GetDetailedStats()
+					throughput := float64(stats.ProcessedFiles) / stats.ElapsedTime.Seconds()
+					
+					info := fmt.Sprintf("%d files processed, %d modified, %.0f files/sec", 
+						stats.ProcessedFiles, stats.ModifiedFiles, throughput)
+					progress.UpdateStage(info)
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	
+	// Submit all files for processing
+	walkErr := filepath.Walk(dstDir, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			pool.Submit(path)
+		}
+		return err
+	})
+	
+	// Signal that all files have been submitted - just close the file channel
+	close(pool.fileChan)
+	pool.wg.Wait() // Wait for workers to finish
+	done <- true
+	
+	// Close error channel safely after workers are done
+	close(pool.errChan)
+	
+	// Get final statistics
+	if progress != nil {
+		finalStats := pool.GetDetailedStats()
+		
+		// Update progress with final detailed info
+		if finalStats.ModifiedFiles > 0 {
+			info := fmt.Sprintf("%d of %d files modified (%d gitignored, %d text, %d binary skipped)", 
+				finalStats.ModifiedFiles, finalStats.ProcessedFiles, 
+				finalStats.GitignoreMatches, finalStats.TextFiles, finalStats.SkippedBinary)
+			progress.UpdateStage(info)
+		} else {
+			info := fmt.Sprintf("%d files scanned, no modifications needed", finalStats.ProcessedFiles)
+			progress.UpdateStage(info)
+		}
+	}
+	
+	return walkErr
 }

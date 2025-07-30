@@ -177,30 +177,9 @@ func (w *Worktree) setupWorktreeWithCoWProgress(progress *ProgressTracker) error
 
 // rewriteAbsolutePathsWithProgress rewrites paths with progress tracking
 func (w *Worktree) rewriteAbsolutePathsWithProgress(progress *ProgressTracker) error {
-	if progress != nil {
-		// Count files first to show progress
-		walker := NewFileWalker(progress)
-		if err := w.countFiles(walker); err == nil {
-			walker.SetTotal(walker.GetFilesWalked())
-		}
-		walker.filesWalked = 0 // Reset for actual processing
-	}
-	
-	return rewriteAbsolutePathsAsync(w.RepoPath, w.WorktreePath)
+	return rewriteAbsolutePathsWithProgress(w.RepoPath, w.WorktreePath, progress)
 }
 
-// countFiles walks the directory to count total files
-func (w *Worktree) countFiles(walker *FileWalker) error {
-	return filepath.Walk(w.WorktreePath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			walker.WalkFile()
-		}
-		return nil
-	})
-}
 
 // setupRegularWorktree creates a worktree using the traditional git worktree method
 func (w *Worktree) setupRegularWorktree(headCommit string) error {
