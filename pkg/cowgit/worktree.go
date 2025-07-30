@@ -41,6 +41,11 @@ func NewWorktreeWithOptions(repoPath, worktreePath, branchName string, noRewrite
 
 // CreateCoWWorktree creates a new worktree using copy-on-write
 func (w *Worktree) CreateCoWWorktree() error {
+	return w.CreateCoWWorktreeWithProgress(nil)
+}
+
+// CreateCoWWorktreeWithProgress creates a new worktree using copy-on-write with progress tracking
+func (w *Worktree) CreateCoWWorktreeWithProgress(progress *ProgressTracker) error {
 	// Clean up any existing worktree first
 	w.runGitCommand(w.RepoPath, "worktree", "remove", "-f", w.WorktreePath) // Ignore error if worktree doesn't exist
 
@@ -58,7 +63,7 @@ func (w *Worktree) CreateCoWWorktree() error {
 	w.BaseCommit = headCommit
 
 	// Try copy-on-write first, fall back to regular worktree if it fails
-	if err := w.setupWorktreeWithCoW(); err != nil {
+	if err := w.setupWorktreeWithCoWProgress(progress); err != nil {
 		return w.setupRegularWorktree(headCommit)
 	}
 
@@ -86,20 +91,42 @@ func (w *Worktree) CreateFromExistingBranch() error {
 
 // setupWorktreeWithCoW creates a worktree using copy-on-write
 func (w *Worktree) setupWorktreeWithCoW() error {
+	return w.setupWorktreeWithCoWProgress(nil)
+}
+
+// setupWorktreeWithCoWProgress creates a worktree using copy-on-write with progress tracking
+func (w *Worktree) setupWorktreeWithCoWProgress(progress *ProgressTracker) error {
 	// Remove existing worktree path if it exists
 	if err := os.RemoveAll(w.WorktreePath); err != nil {
 		return fmt.Errorf("failed to remove existing worktree path: %w", err)
 	}
 
-	// Create CoW clone directly to the worktree path
+	// Stage 1: Copy-on-write cloning
+	if progress != nil {
+		progress.StartStage("CoW cloning")
+	}
 	if err := CloneDirectory(w.RepoPath, w.WorktreePath); err != nil {
+		if progress != nil {
+			progress.Error(err)
+		}
 		return fmt.Errorf("failed to clone directory: %w", err)
 	}
+	if progress != nil {
+		progress.FinishStage()
+	}
 
+	// Stage 2: Git branch setup
+	if progress != nil {
+		progress.StartStage("Setting up git branch")
+	}
+	
 	// Create new branch without checking it out (to preserve untracked files)
 	if _, err := w.runGitCommand(w.WorktreePath, "branch", w.BranchName); err != nil {
 		// Clean up the clone if branch creation fails
 		os.RemoveAll(w.WorktreePath)
+		if progress != nil {
+			progress.Error(err)
+		}
 		return fmt.Errorf("failed to create branch %s: %w", w.BranchName, err)
 	}
 	
@@ -107,6 +134,9 @@ func (w *Worktree) setupWorktreeWithCoW() error {
 	if _, err := w.runGitCommand(w.WorktreePath, "symbolic-ref", "HEAD", "refs/heads/"+w.BranchName); err != nil {
 		// Clean up the clone if symbolic-ref fails
 		os.RemoveAll(w.WorktreePath)
+		if progress != nil {
+			progress.Error(err)
+		}
 		return fmt.Errorf("failed to switch to branch %s: %w", w.BranchName, err)
 	}
 
@@ -114,19 +144,62 @@ func (w *Worktree) setupWorktreeWithCoW() error {
 	if err := w.registerWorktreeManually(); err != nil {
 		// Clean up the clone if worktree registration fails
 		os.RemoveAll(w.WorktreePath)
+		if progress != nil {
+			progress.Error(err)
+		}
 		return fmt.Errorf("failed to register worktree: %w", err)
 	}
+	
+	if progress != nil {
+		progress.FinishStage()
+	}
 
-	// Rewrite absolute paths in gitignored files (unless disabled)
+	// Stage 3: Path rewriting (if enabled)
 	if !w.NoRewrite {
-		if err := rewriteAbsolutePathsAsync(w.RepoPath, w.WorktreePath); err != nil {
+		if progress != nil {
+			progress.StartStage("Fixing absolute paths")
+		}
+		
+		if err := w.rewriteAbsolutePathsWithProgress(progress); err != nil {
 			// Log warning but don't fail - path rewriting is best effort
-			// TODO: Add proper logging
-			_ = err
+			if progress != nil {
+				progress.UpdateStage("(skipped due to error)")
+			}
+		}
+		
+		if progress != nil {
+			progress.FinishStage()
 		}
 	}
 
 	return nil
+}
+
+// rewriteAbsolutePathsWithProgress rewrites paths with progress tracking
+func (w *Worktree) rewriteAbsolutePathsWithProgress(progress *ProgressTracker) error {
+	if progress != nil {
+		// Count files first to show progress
+		walker := NewFileWalker(progress)
+		if err := w.countFiles(walker); err == nil {
+			walker.SetTotal(walker.GetFilesWalked())
+		}
+		walker.filesWalked = 0 // Reset for actual processing
+	}
+	
+	return rewriteAbsolutePathsAsync(w.RepoPath, w.WorktreePath)
+}
+
+// countFiles walks the directory to count total files
+func (w *Worktree) countFiles(walker *FileWalker) error {
+	return filepath.Walk(w.WorktreePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			walker.WalkFile()
+		}
+		return nil
+	})
 }
 
 // setupRegularWorktree creates a worktree using the traditional git worktree method

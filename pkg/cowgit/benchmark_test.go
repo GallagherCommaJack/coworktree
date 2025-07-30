@@ -109,6 +109,9 @@ func benchmarkCoWClone(b *testing.B, config BenchmarkConfig) {
 	// Setup signal handler for cleanup
 	setupSignalHandler()
 	
+	// Create progress tracker for verbose benchmarks (only shows in TTY)
+	progress := NewProgressTracker(false) // Disabled for benchmarks to avoid timing interference
+	
 	// Create test directory structure
 	tempDir, err := ioutil.TempDir("", "cow_benchmark_")
 	if err != nil {
@@ -123,8 +126,23 @@ func benchmarkCoWClone(b *testing.B, config BenchmarkConfig) {
 	}()
 
 	srcDir := filepath.Join(tempDir, "source")
+	
+	// Show progress for test directory creation if it's a large test
+	if config.FileCount > 1000 {
+		progress.SetQuiet(false)
+		progress.StartStage(fmt.Sprintf("Creating test directory (%d files)", config.FileCount))
+	}
+	
 	if err := createTestDirectory(srcDir, config); err != nil {
+		if progress != nil {
+			progress.Error(err)
+		}
 		b.Fatalf("Failed to create test directory: %v", err)
+	}
+	
+	if config.FileCount > 1000 {
+		progress.FinishStage()
+		progress.SetQuiet(true) // Quiet during actual benchmark timing
 	}
 
 	b.ResetTimer()

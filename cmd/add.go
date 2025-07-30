@@ -11,8 +11,9 @@ import (
 )
 
 var (
-	branchFlag string
-	noRewrite  bool
+	branchFlag    string
+	noRewrite     bool
+	forceProgress bool
 )
 
 // addCmd represents the add command
@@ -72,11 +73,14 @@ func addWorktree(cmd *cobra.Command, args []string) error {
 	// Create worktree instance
 	worktree := cowgit.NewWorktreeWithOptions(repoPath, worktreePath, branchName, noRewrite)
 
+	// Create progress tracker for TTY output (shows in interactive mode or when forced)
+	progress := cowgit.NewProgressTracker(forceProgress)
+
 	// Try CoW first, fall back to regular if not supported or disabled
 	isCoW := false
 	if !noCow {
 		if supported, err := cowgit.IsCoWSupported(repoPath); err == nil && supported {
-			if err := worktree.CreateCoWWorktree(); err == nil {
+			if err := worktree.CreateCoWWorktreeWithProgress(progress); err == nil {
 				isCoW = true
 			}
 		}
@@ -116,4 +120,5 @@ func init() {
 
 	addCmd.Flags().StringVarP(&branchFlag, "branch", "b", "", "create a new branch")
 	addCmd.Flags().BoolVar(&noRewrite, "no-rewrite", false, "skip absolute path rewriting in gitignored files")
+	addCmd.Flags().BoolVar(&forceProgress, "progress", false, "show progress indicators even in non-interactive mode")
 }
