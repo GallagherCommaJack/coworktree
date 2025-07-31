@@ -46,6 +46,20 @@ func addWorktree(cmd *cobra.Command, args []string) error {
 	// Parse arguments like git worktree add
 	worktreePath := args[0]
 	
+	// Canonicalize and absolutize the worktree path immediately
+	absWorktreePath, err := filepath.Abs(worktreePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve absolute path for %s: %w", worktreePath, err)
+	}
+	
+	// Also canonicalize to resolve any symlinks in the path
+	// Note: EvalSymlinks will fail if the path doesn't exist yet, so we need to handle parent directories
+	canonicalWorktreePath, err := canonicalizePath(absWorktreePath)
+	if err != nil {
+		return fmt.Errorf("failed to canonicalize worktree path %s: %w", absWorktreePath, err)
+	}
+	worktreePath = canonicalWorktreePath
+	
 	// Use branch flag if provided, otherwise auto-generate from path
 	branchName := branchFlag
 	if branchName == "" {
@@ -58,11 +72,18 @@ func addWorktree(cmd *cobra.Command, args []string) error {
 		commitish = args[1]
 	}
 
-	// Get current working directory as repo path
+	// Get current working directory as repo path and canonicalize it
 	repoPath, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
+	
+	// Canonicalize the repo path to resolve any symlinks
+	canonicalRepoPath, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		return fmt.Errorf("failed to canonicalize repo path %s: %w", repoPath, err)
+	}
+	repoPath = canonicalRepoPath
 
 	if verbose {
 		fmt.Printf("Creating worktree: %s\n", worktreePath)
@@ -120,6 +141,27 @@ func addWorktree(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+
+// canonicalizePath resolves symlinks in a path, handling the case where the final component doesn't exist yet
+func canonicalizePath(path string) (string, error) {
+	// Try to canonicalize the full path first
+	if canonical, err := filepath.EvalSymlinks(path); err == nil {
+		return canonical, nil
+	}
+	
+	// If that fails (path doesn't exist), canonicalize the parent and append the final component
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	
+	// Canonicalize the parent directory
+	canonicalDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		// If parent doesn't exist either, just return the original absolute path
+		return path, nil
+	}
+	
+	return filepath.Join(canonicalDir, base), nil
+}
 
 func init() {
 	rootCmd.AddCommand(addCmd)
