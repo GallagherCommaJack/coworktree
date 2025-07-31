@@ -164,14 +164,14 @@ func (w *Worktree) setupWorktreeWithCoWProgress(progress *ProgressTracker) error
 		return fmt.Errorf("failed to create branch %s: %w", w.BranchName, err)
 	}
 	
-	// Switch to the new branch without overwriting working directory
-	if _, err := w.runGitCommand(w.WorktreePath, "symbolic-ref", "HEAD", "refs/heads/"+w.BranchName); err != nil {
-		// Clean up the clone if symbolic-ref fails
+	// Checkout the new branch to ensure working directory matches the branch state
+	if _, err := w.runGitCommand(w.WorktreePath, "checkout", w.BranchName); err != nil {
+		// Clean up the clone if checkout fails
 		os.RemoveAll(w.WorktreePath)
 		if progress != nil {
 			progress.Error(err)
 		}
-		return fmt.Errorf("failed to switch to branch %s: %w", w.BranchName, err)
+		return fmt.Errorf("failed to checkout branch %s: %w", w.BranchName, err)
 	}
 
 	// Manually register the cloned directory as a proper git worktree
