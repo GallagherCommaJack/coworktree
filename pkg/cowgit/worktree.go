@@ -154,8 +154,8 @@ func (w *Worktree) setupWorktreeWithCoWProgress(progress *ProgressTracker) error
 		progress.StartStage("Setting up git branch")
 	}
 	
-	// Create new branch without checking it out (to preserve untracked files)
-	if _, err := w.runGitCommand(w.WorktreePath, "branch", w.BranchName); err != nil {
+	// Create new branch from the base commit (to preserve commit history)
+	if _, err := w.runGitCommand(w.WorktreePath, "branch", w.BranchName, w.BaseCommit); err != nil {
 		// Clean up the clone if branch creation fails
 		os.RemoveAll(w.WorktreePath)
 		if progress != nil {
