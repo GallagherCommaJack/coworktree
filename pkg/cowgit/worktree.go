@@ -13,11 +13,14 @@ import (
 
 // Worktree represents a git worktree with CoW capabilities
 type Worktree struct {
-	RepoPath     string
-	WorktreePath string
-	BranchName   string
-	BaseCommit   string
-	NoRewrite    bool
+	RepoPath      string
+	WorktreePath  string
+	BranchName    string
+	BaseCommit    string
+	NoRewrite     bool
+	ParallelCoW   bool
+	ForceParallel bool
+	ParallelDepth int
 }
 
 // NewWorktree creates a new Worktree instance
@@ -36,6 +39,19 @@ func NewWorktreeWithOptions(repoPath, worktreePath, branchName string, noRewrite
 		WorktreePath: worktreePath,
 		BranchName:   branchName,
 		NoRewrite:    noRewrite,
+	}
+}
+
+// NewWorktreeWithAllOptions creates a new Worktree instance with all options
+func NewWorktreeWithAllOptions(repoPath, worktreePath, branchName string, noRewrite, parallelCoW, forceParallel bool, parallelDepth int) *Worktree {
+	return &Worktree{
+		RepoPath:      repoPath,
+		WorktreePath:  worktreePath,
+		BranchName:    branchName,
+		NoRewrite:     noRewrite,
+		ParallelCoW:   parallelCoW,
+		ForceParallel: forceParallel,
+		ParallelDepth: parallelDepth,
 	}
 }
 
@@ -89,10 +105,6 @@ func (w *Worktree) CreateFromExistingBranch() error {
 	return nil
 }
 
-// setupWorktreeWithCoW creates a worktree using copy-on-write
-func (w *Worktree) setupWorktreeWithCoW() error {
-	return w.setupWorktreeWithCoWProgress(nil)
-}
 
 // setupWorktreeWithCoWProgress creates a worktree using copy-on-write with progress tracking
 func (w *Worktree) setupWorktreeWithCoWProgress(progress *ProgressTracker) error {
@@ -103,9 +115,31 @@ func (w *Worktree) setupWorktreeWithCoWProgress(progress *ProgressTracker) error
 
 	// Stage 1: Copy-on-write cloning
 	if progress != nil {
-		progress.StartStage("CoW cloning")
+		if w.ParallelCoW && w.ParallelDepth > 0 {
+			progress.StartStage(fmt.Sprintf("Depth-%d parallel CoW cloning", w.ParallelDepth))
+		} else if w.ParallelCoW && w.ForceParallel {
+			progress.StartStage("Forced parallel CoW cloning")
+		} else if w.ParallelCoW {
+			progress.StartStage("Parallel CoW cloning")
+		} else {
+			progress.StartStage("CoW cloning")
+		}
 	}
-	if err := CloneDirectory(w.RepoPath, w.WorktreePath); err != nil {
+	
+	var err error
+	if w.ParallelCoW {
+		if w.ParallelDepth > 0 {
+			err = CloneDirectoryParallelDepth(w.RepoPath, w.WorktreePath, w.ParallelDepth, progress)
+		} else if w.ForceParallel {
+			err = CloneDirectoryParallelForced(w.RepoPath, w.WorktreePath, progress)
+		} else {
+			err = CloneDirectoryParallel(w.RepoPath, w.WorktreePath, progress)
+		}
+	} else {
+		err = CloneDirectory(w.RepoPath, w.WorktreePath)
+	}
+	
+	if err != nil {
 		if progress != nil {
 			progress.Error(err)
 		}

@@ -439,3 +439,58 @@ func calculateDirCount(depth, filesPerDir, totalFiles int) int {
 	// Rough estimation for directory count
 	return (totalFiles / filesPerDir) + depth*2
 }
+
+// BenchmarkParallelCoWCloning tests the performance of parallel CoW cloning
+func BenchmarkParallelCoWCloning(b *testing.B) {
+	if supported, err := IsCoWSupported("."); err != nil || !supported {
+		b.Skip("CoW not supported on this system")
+	}
+
+	// Create a test repository with moderate complexity for parallel testing
+	testDir := filepath.Join(os.TempDir(), "parallel_cow_benchmark_"+fmt.Sprintf("%d", time.Now().UnixNano()))
+	defer os.RemoveAll(testDir)
+
+	// Use a medium-sized test case that should benefit from parallelization
+	config := BenchmarkConfig{
+		Name:        "ParallelTest",
+		FileCount:   500,
+		FileSizeKB:  10,
+		DirDepth:    4,
+		FilesPerDir: 25,
+		BinaryFiles: false,
+	}
+
+	if err := createTestDirectory(testDir, config); err != nil {
+		b.Fatalf("Failed to create test repo: %v", err)
+	}
+
+	b.Run("Sequential", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			dstDir := filepath.Join(os.TempDir(), fmt.Sprintf("seq_cow_clone_%d_%d", time.Now().UnixNano(), i))
+			if err := CloneDirectory(testDir, dstDir); err != nil {
+				b.Errorf("Sequential CoW clone failed: %v", err)
+			}
+			os.RemoveAll(dstDir) // Clean up
+		}
+	})
+
+	b.Run("Parallel", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			dstDir := filepath.Join(os.TempDir(), fmt.Sprintf("par_cow_clone_%d_%d", time.Now().UnixNano(), i))
+			if err := CloneDirectoryParallel(testDir, dstDir, nil); err != nil {
+				b.Errorf("Parallel CoW clone failed: %v", err)
+			}
+			os.RemoveAll(dstDir) // Clean up
+		}
+	})
+
+	b.Run("ForcedParallel", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			dstDir := filepath.Join(os.TempDir(), fmt.Sprintf("forced_cow_clone_%d_%d", time.Now().UnixNano(), i))
+			if err := CloneDirectoryParallelForced(testDir, dstDir, nil); err != nil {
+				b.Errorf("Forced parallel CoW clone failed: %v", err)
+			}
+			os.RemoveAll(dstDir) // Clean up
+		}
+	})
+}

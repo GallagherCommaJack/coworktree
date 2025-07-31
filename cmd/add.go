@@ -11,9 +11,12 @@ import (
 )
 
 var (
-	branchFlag    string
-	enableRewrite bool
-	forceProgress bool
+	branchFlag      string
+	enableRewrite   bool
+	forceProgress   bool
+	parallelCoW     bool
+	forceParallel   bool
+	parallelDepth   int
 )
 
 // addCmd represents the add command
@@ -74,7 +77,7 @@ func addWorktree(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create worktree instance (invert the logic - disable rewrite by default)
-	worktree := cowgit.NewWorktreeWithOptions(repoPath, worktreePath, branchName, !enableRewrite)
+	worktree := cowgit.NewWorktreeWithAllOptions(repoPath, worktreePath, branchName, !enableRewrite, parallelCoW, forceParallel, parallelDepth)
 
 	// Create progress tracker for TTY output (shows in interactive mode or when forced)
 	progress := cowgit.NewProgressTracker(forceProgress)
@@ -124,4 +127,7 @@ func init() {
 	addCmd.Flags().StringVarP(&branchFlag, "branch", "b", "", "create a new branch")
 	addCmd.Flags().BoolVar(&enableRewrite, "rewrite-paths", false, "enable absolute path rewriting in gitignored files (slow but fixes build artifacts)")
 	addCmd.Flags().BoolVar(&forceProgress, "progress", false, "show progress indicators even in non-interactive mode")
+	addCmd.Flags().BoolVar(&parallelCoW, "parallel-cow", false, "experimental: use parallel file-level CoW instead of atomic directory clone")
+	addCmd.Flags().BoolVar(&forceParallel, "force-parallel", false, "force parallel CoW even when atomic clone would work (for testing)")
+	addCmd.Flags().IntVar(&parallelDepth, "parallel-depth", 0, "recurse to depth N and clone each subdirectory atomically in parallel (0=disabled)")
 }
