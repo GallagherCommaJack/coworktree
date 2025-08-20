@@ -149,29 +149,9 @@ func (w *Worktree) setupWorktreeWithCoWProgress(progress *ProgressTracker) error
 		progress.FinishStage()
 	}
 
-	// Stage 2: Git branch setup
+	// Stage 2: Git worktree registration  
 	if progress != nil {
-		progress.StartStage("Setting up git branch")
-	}
-	
-	// Create new branch from the base commit (to preserve commit history)
-	if _, err := w.runGitCommand(w.WorktreePath, "branch", w.BranchName, w.BaseCommit); err != nil {
-		// Clean up the clone if branch creation fails
-		os.RemoveAll(w.WorktreePath)
-		if progress != nil {
-			progress.Error(err)
-		}
-		return fmt.Errorf("failed to create branch %s: %w", w.BranchName, err)
-	}
-	
-	// Checkout the new branch to ensure working directory matches the branch state
-	if _, err := w.runGitCommand(w.WorktreePath, "checkout", w.BranchName); err != nil {
-		// Clean up the clone if checkout fails
-		os.RemoveAll(w.WorktreePath)
-		if progress != nil {
-			progress.Error(err)
-		}
-		return fmt.Errorf("failed to checkout branch %s: %w", w.BranchName, err)
+		progress.StartStage("Setting up git worktree")
 	}
 
 	// Manually register the cloned directory as a proper git worktree
@@ -184,11 +164,33 @@ func (w *Worktree) setupWorktreeWithCoWProgress(progress *ProgressTracker) error
 		return fmt.Errorf("failed to register worktree: %w", err)
 	}
 	
+	// Stage 3: Set up branch references directly (after worktree registration)
+	// Use git update-ref to directly set the branch reference to preserve commit history
+	branchRef := fmt.Sprintf("refs/heads/%s", w.BranchName)
+	if _, err := w.runGitCommand(w.WorktreePath, "update-ref", branchRef, w.BaseCommit); err != nil {
+		// Clean up the clone if branch reference setup fails
+		os.RemoveAll(w.WorktreePath)
+		if progress != nil {
+			progress.Error(err)
+		}
+		return fmt.Errorf("failed to set branch reference %s to commit %s: %w", branchRef, w.BaseCommit, err)
+	}
+	
+	// Use git symbolic-ref to set HEAD to point to our new branch
+	if _, err := w.runGitCommand(w.WorktreePath, "symbolic-ref", "HEAD", branchRef); err != nil {
+		// Clean up the clone if HEAD setup fails
+		os.RemoveAll(w.WorktreePath)
+		if progress != nil {
+			progress.Error(err)
+		}
+		return fmt.Errorf("failed to set HEAD to branch %s: %w", w.BranchName, err)
+	}
+	
 	if progress != nil {
 		progress.FinishStage()
 	}
 
-	// Stage 3: Path rewriting (if enabled)
+	// Stage 4: Path rewriting (if enabled)
 	if !w.NoRewrite {
 		if progress != nil {
 			progress.StartStage("Fixing absolute paths")

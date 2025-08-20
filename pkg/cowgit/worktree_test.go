@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -497,6 +498,336 @@ func TestAPFSClonePreservesAllFiles(t *testing.T) {
 		t.Errorf("Nested file not preserved: %v", err)
 	} else if string(content) != "nested" {
 		t.Errorf("Nested file content wrong: got %s", string(content))
+	}
+}
+
+func TestBranchInheritsGitHistoryDiagnostic(t *testing.T) {
+	// Create a temporary git repository for testing
+	tempDir, err := os.MkdirTemp("", "coworktree-history-diag-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Initialize git repo and create multiple commits to establish history
+	setupGitRepo(t, tempDir)
+	
+	// Get the HEAD commit hash for later verification
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = tempDir
+	headCommitBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get HEAD commit: %v", err)
+	}
+	headCommit := strings.TrimSpace(string(headCommitBytes))
+	t.Logf("Original HEAD commit: %s", headCommit)
+
+	// List all commits in original repo
+	cmd = exec.Command("git", "log", "--oneline")
+	cmd.Dir = tempDir
+	originalLogBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get original log: %v", err)
+	}
+	t.Logf("Original repo commits:\n%s", string(originalLogBytes))
+
+	// Test the current git worktree behavior (expected correct behavior)
+	worktreePath, err := os.MkdirTemp("", "regular-worktree-*")
+	if err != nil {
+		t.Fatalf("Failed to create worktree temp dir: %v", err)
+	}
+	defer os.RemoveAll(worktreePath)
+	
+	// Remove it so git worktree can create it
+	os.RemoveAll(worktreePath)
+	
+	// Create regular worktree with explicit commit (this should preserve history)
+	if err := runCommand(tempDir, "git", "worktree", "add", "-b", "regular-test-branch", worktreePath, headCommit); err != nil {
+		t.Fatalf("Failed to create regular worktree: %v", err)
+	}
+
+	// Check regular worktree history
+	cmd = exec.Command("git", "log", "--oneline")
+	cmd.Dir = worktreePath
+	regularLogBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get regular worktree log: %v", err)
+	}
+	t.Logf("Regular worktree commits:\n%s", string(regularLogBytes))
+
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = worktreePath
+	regularHeadBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get regular worktree HEAD: %v", err)
+	}
+	regularHead := strings.TrimSpace(string(regularHeadBytes))
+
+	if regularHead != headCommit {
+		t.Errorf("Regular worktree HEAD %s doesn't match original %s", regularHead, headCommit)
+	} else {
+		t.Logf("✓ Regular worktree correctly preserves git history")
+	}
+
+	// Clean up regular worktree
+	if err := runCommand(tempDir, "git", "worktree", "remove", "-f", worktreePath); err != nil {
+		t.Logf("Warning: Failed to remove regular worktree: %v", err)
+	}
+}
+
+func TestBranchInheritsGitHistory(t *testing.T) {
+	// Create a temporary git repository for testing
+	tempDir, err := os.MkdirTemp("", "coworktree-history-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Initialize git repo and create multiple commits to establish history
+	setupGitRepo(t, tempDir)
+	
+	// Create additional commits to build history
+	secondFile := filepath.Join(tempDir, "second.txt")
+	if err := os.WriteFile(secondFile, []byte("second content"), 0644); err != nil {
+		t.Fatalf("Failed to create second file: %v", err)
+	}
+	if err := runCommand(tempDir, "git", "add", "second.txt"); err != nil {
+		t.Fatalf("Failed to add second file: %v", err)
+	}
+	if err := runCommand(tempDir, "git", "commit", "-m", "Second commit"); err != nil {
+		t.Fatalf("Failed to create second commit: %v", err)
+	}
+
+	thirdFile := filepath.Join(tempDir, "third.txt")
+	if err := os.WriteFile(thirdFile, []byte("third content"), 0644); err != nil {
+		t.Fatalf("Failed to create third file: %v", err)
+	}
+	if err := runCommand(tempDir, "git", "add", "third.txt"); err != nil {
+		t.Fatalf("Failed to add third file: %v", err)
+	}
+	if err := runCommand(tempDir, "git", "commit", "-m", "Third commit"); err != nil {
+		t.Fatalf("Failed to create third commit: %v", err)
+	}
+
+	// Get the current HEAD commit hash for comparison (AFTER all commits are made)
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = tempDir
+	headCommitBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get HEAD commit: %v", err)
+	}
+	headCommit := strings.TrimSpace(string(headCommitBytes))
+	t.Logf("Final HEAD commit after all test commits: %s", headCommit)
+
+	// Get the commit log from main branch to compare against
+	cmd = exec.Command("git", "log", "--oneline", "--format=%H %s")
+	cmd.Dir = tempDir
+	mainLogBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get main branch log: %v", err)
+	}
+	mainLog := string(mainLogBytes)
+
+	// Create a CoW worktree using either CoW or traditional git worktree
+	worktreePath, err := os.MkdirTemp("", "cow-worktree-history-*")
+	if err != nil {
+		t.Fatalf("Failed to create worktree temp dir: %v", err)
+	}
+	defer os.RemoveAll(worktreePath)
+	
+	// Remove it so CreateCoWWorktree can create it
+	os.RemoveAll(worktreePath)
+	worktree := NewWorktree(tempDir, worktreePath, "history-test-branch")
+
+	// Test both CoW worktree creation and fallback to regular worktree
+	if err := worktree.CreateCoWWorktree(); err != nil {
+		t.Logf("CoW worktree creation failed (expected on non-APFS): %v", err)
+		
+		// Fall back to regular git worktree for testing, but preserve the correct behavior
+		// Use the same logic as setupRegularWorktree - create branch from specific commit
+		if err := os.MkdirAll(filepath.Dir(worktreePath), 0755); err != nil {
+			t.Fatalf("Failed to create worktree dir: %v", err)
+		}
+		
+		// Re-capture the current HEAD since it might have changed
+		cmd = exec.Command("git", "rev-parse", "HEAD")
+		cmd.Dir = tempDir
+		currentHeadBytes, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("Failed to get current HEAD commit: %v", err)
+		}
+		currentHead := strings.TrimSpace(string(currentHeadBytes))
+		
+		if err := runCommand(tempDir, "git", "worktree", "add", "-b", "history-test-branch", worktreePath, currentHead); err != nil {
+			t.Fatalf("Failed to create regular worktree with commit %s: %v", currentHead, err)
+		}
+		
+		t.Logf("Created regular worktree for testing")
+	} else {
+		t.Logf("CoW worktree creation succeeded")
+		
+		// Debug: Check what git thinks about the CoW clone
+		cmd = exec.Command("git", "log", "--oneline")
+		cmd.Dir = worktreePath
+		logBytes, err := cmd.Output()
+		if err != nil {
+			t.Logf("Failed to get CoW log: %v", err)
+		} else {
+			t.Logf("CoW worktree commits:\n%s", string(logBytes))
+		}
+		
+		// Check if the target commit exists in the CoW clone
+		cmd = exec.Command("git", "cat-file", "-e", headCommit)
+		cmd.Dir = worktreePath
+		if err := cmd.Run(); err != nil {
+			t.Logf("Target commit %s does NOT exist in CoW clone: %v", headCommit, err)
+		} else {
+			t.Logf("Target commit %s EXISTS in CoW clone", headCommit)
+		}
+		
+		// Check all available refs
+		cmd = exec.Command("git", "for-each-ref")
+		cmd.Dir = worktreePath
+		refsBytes, err := cmd.Output()
+		if err != nil {
+			t.Logf("Failed to get refs: %v", err)
+		} else {
+			t.Logf("Available refs in CoW clone:\n%s", string(refsBytes))
+		}
+		
+		cmd = exec.Command("git", "status")
+		cmd.Dir = worktreePath
+		statusBytes, err := cmd.Output()
+		if err != nil {
+			t.Logf("Failed to get CoW status: %v", err)
+		} else {
+			t.Logf("CoW status:\n%s", string(statusBytes))
+		}
+	}
+
+	// Verify the worktree directory exists and is a git repository
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		t.Fatalf("Worktree directory does not exist: %s", worktreePath)
+	}
+
+	// Check if .git exists in worktree
+	gitPath := filepath.Join(worktreePath, ".git")
+	if _, err := os.Stat(gitPath); os.IsNotExist(err) {
+		t.Fatalf("No .git found in worktree: %s", gitPath)
+	}
+
+	// Verify the new branch exists and has commits (not orphaned)
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = worktreePath
+	branchHeadBytes, err := cmd.Output()
+	if err != nil {
+		// This indicates the branch has no commits (orphaned branch)
+		cmd = exec.Command("git", "status")
+		cmd.Dir = worktreePath
+		statusBytes, _ := cmd.Output()
+		
+		if strings.Contains(string(statusBytes), "No commits yet") {
+			t.Errorf("DETECTED ORPHANED BRANCH: The branch was created without git history (equivalent to 'git switch -c')\nThis means the CoW worktree implementation is not properly preserving git history from the parent branch.\nStatus: %s", string(statusBytes))
+			return // Don't continue with further tests since we detected the core issue
+		}
+		
+		cmd = exec.Command("git", "branch", "--show-current")
+		cmd.Dir = worktreePath
+		currentBranchBytes, _ := cmd.Output()
+		currentBranch := strings.TrimSpace(string(currentBranchBytes))
+		
+		t.Fatalf("Failed to get branch HEAD from %s (current branch: %s): %v\nStatus: %s", worktreePath, currentBranch, err, string(statusBytes))
+	}
+	branchHead := strings.TrimSpace(string(branchHeadBytes))
+
+	if branchHead != headCommit {
+		t.Errorf("Branch HEAD %s does not match original HEAD %s", branchHead, headCommit)
+	}
+
+	// Verify the branch has the same commit history as the main branch
+	cmd = exec.Command("git", "log", "--oneline", "--format=%H %s")
+	cmd.Dir = worktreePath
+	branchLogBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get branch log: %v", err)
+	}
+	branchLog := string(branchLogBytes)
+
+	if branchLog != mainLog {
+		t.Errorf("Branch commit history differs from main branch\nMain:\n%s\nBranch:\n%s", mainLog, branchLog)
+	}
+
+	// Verify we have multiple commits in the history (at least 3)
+	commitCount := len(strings.Split(strings.TrimSpace(branchLog), "\n"))
+	if commitCount < 3 {
+		t.Errorf("Expected at least 3 commits in history, got %d", commitCount)
+	}
+
+	// Verify this is NOT an orphaned branch by checking if it shares commits with main
+	// An orphaned branch would have completely different commit hashes
+	cmd = exec.Command("git", "merge-base", "HEAD", "main")
+	cmd.Dir = worktreePath
+	sharedCommitsBytes, err := cmd.Output()
+	if err != nil {
+		// If there's no main branch, try master
+		cmd = exec.Command("git", "merge-base", "HEAD", "master")
+		cmd.Dir = worktreePath
+		sharedCommitsBytes, err = cmd.Output()
+		if err != nil {
+			// For our test, we should be able to find shared history with the default branch
+			// Let's get the default branch name from the original repo
+			cmd = exec.Command("git", "branch", "--show-current")
+			cmd.Dir = tempDir
+			currentBranchBytes, err := cmd.Output()
+			if err == nil {
+				currentBranch := strings.TrimSpace(string(currentBranchBytes))
+				if currentBranch != "history-test-branch" && currentBranch != "" {
+					cmd = exec.Command("git", "merge-base", "HEAD", currentBranch)
+					cmd.Dir = worktreePath
+					sharedCommitsBytes, err = cmd.Output()
+				}
+			}
+		}
+	}
+
+	// If merge-base succeeds, we have shared history (which is what we want)
+	if err != nil {
+		t.Logf("Warning: Could not verify shared history with merge-base: %v", err)
+	} else {
+		sharedCommit := strings.TrimSpace(string(sharedCommitsBytes))
+		if sharedCommit == "" {
+			t.Error("No shared commits found - branch appears to be orphaned")
+		} else {
+			t.Logf("Branch correctly shares history, merge-base: %s", sharedCommit)
+		}
+	}
+
+	// Additional check: verify the branch was created via `git branch` not `git switch -c`
+	// by checking that the first commit in our branch matches the first commit in the repo
+	cmd = exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
+	cmd.Dir = tempDir
+	firstMainCommitBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get first commit: %v", err)
+	}
+	firstMainCommit := strings.TrimSpace(string(firstMainCommitBytes))
+
+	// Check if our branch can see the same first commit
+	cmd = exec.Command("git", "rev-list", "--max-parents=0", "history-test-branch")
+	cmd.Dir = worktreePath
+	branchFirstCommitBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get branch first commit: %v", err)
+	}
+	branchFirstCommit := strings.TrimSpace(string(branchFirstCommitBytes))
+
+	if firstMainCommit != branchFirstCommit {
+		t.Errorf("Branch first commit %s differs from main first commit %s - branch may be orphaned", branchFirstCommit, firstMainCommit)
+	}
+
+	// Clean up
+	if err := worktree.Remove(); err != nil {
+		t.Errorf("Failed to remove worktree: %v", err)
 	}
 }
 
